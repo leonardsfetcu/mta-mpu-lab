@@ -5,37 +5,65 @@
 #include <linux/cdev.h>
 #include <linux/uaccess.h>
 #include <linux/property.h>
-#include <linux/platform_device.h>
 #include <linux/of_device.h>
 
 #define DEVICE_NAME_TEMP "bmp280_temperature"
 #define DEVICE_NAME_PRESSURE "bmp280_pressure"
 #define CLASS_NAME "bmp280"
+#define BMP280_REG_CHIPID 0xD0
+#define REG_CTRL_MEAS 0xF4
+#define BMP280_REG_PRESS_MSB 0xF7
+#define REG_CONFIG 0xF5
+#define BMP280_REG_TEMP_MSB 0xFA
+#define BMP280_CHIP_ID 0x58
 
 
-
-// Declarații funcții
-static int bmp280_probe(struct platform_device *pdev);
-static int bmp280_remove(struct platform_device *pdev);
-
+// Functions declaration
+static int bmp280_probe(struct spi_device *client);
+static void bmp280_remove(struct spi_device *client);
 static ssize_t bmp280_temp_read(struct file *file, char __user *buffer, size_t len, loff_t *offset);
 static ssize_t bmp280_pressure_read(struct file *file, char __user *buffer, size_t len, loff_t *offset);
+static int bmp280_write_register(uint8_t reg, uint8_t value);
+static int bmp280_read_register(uint8_t reg, uint8_t *data, size_t len);
+static int read_calibration_data(void);
 
-static struct of_device_id bmp280_driver_ids[] = {
+
+
+
+// Device tree bindings
+static struct of_device_id bmp280_of_ids[] = {
     {
-        .compatible = "mta-labs, bmp280-spi"
+        .compatible = "mta-labs,bmp280-spi",
     }, { /* sentinel */ }
 };
+MODULE_DEVICE_TABLE(of, bmp280_of_ids);
 
-static struct platform_driver bmp280_driver = {
+static struct spi_driver bmp280_driver = {
     .probe = bmp280_probe,
     .remove = bmp280_remove,
     .driver = {
-        .name = "bmp280_spi_driver",
-        .of_match_table = bmp280_driver_ids
-    }
+        .name = "bmp280-spi",
+        .of_match_table = bmp280_of_ids,
+    },
 };
 
+static struct bmp280_calib {
+    uint16_t dig_T1;
+    int16_t dig_T2;
+    int16_t dig_T3;
+    uint16_t dig_P1;
+    int16_t dig_P2;
+    int16_t dig_P3;
+    int16_t dig_P4;
+    int16_t dig_P5;
+    int16_t dig_P6;
+    int16_t dig_P7;
+    int16_t dig_P8;
+    int16_t dig_P9;
+};
+
+
+static struct bmp280_calib calib;
 static int temp_major;
 static int pressure_major;
 
@@ -44,70 +72,176 @@ static struct spi_device *spi_dev;
 static struct class *bmp280_class;
 static struct device *temp_device;
 static struct device *pressure_device;
-static char temp_buffer[] = "Temperature: 25.5 C\n";
-static char pressure_buffer[] = "Pressure: 1013 hPa\n";
-
 
 // Structurile pentru operațiile dispozitivelor
 static const struct file_operations temp_fops = {
-    .owner = THIS_MODULE,
     .read = bmp280_temp_read
 };
 
 static const struct file_operations pressure_fops = {
-    .owner = THIS_MODULE,
     .read = bmp280_pressure_read
 };
 
-int bmp280_probe(platform_device *pdev)
+int bmp280_probe(struct spi_device *client)
 {
-    struct device *dev = pdev->dev;
-    int spiMaxFreq, spiBitsPerWord, ret;
+    pr_info("Hello from bmp280_probe\n");
     
-    // Check if <spi-max-frequency> property is configured in device tree
-    if(device_property_present(dev,"spi-max-frequency"))
-    {
-        // Get <spi-max-frequency> property actual value from device tree and store in spiMaxFreq
-        ret = device_property_read_u32(dev,"spi-max-frequency",&spiMaxFreq);
-        if(ret) {
-            pr_err("bmp280_driver: Error: Unable to read <spi-max-frequency> property value\n");
-            return -1;
-        }
+    spi_dev = client;
+    int ret;
+    uint8_t id;
+
+    ret = spi_setup(spi_dev);
+    if(ret < 0) {
+		pr_err("BMP280 driver: Unable to setup SPI bus\n");
+		return -1;
     }
-    else {
-        pr_info("bmp280_driver: <spi-max-frequency> property not configured in device tree\n");
-        spiMaxFreq = 1000000; // Set default value to 1MHz
+    else
+    {
+        pr_info("BMP280 driver: SPI bus OK\n");
     }
 
-    // Check if <spi-bits-per-word> property is configured in device tree
-    if(device_property_present(dev,"spi-bits-per-word"))
-    {
-        ret = device_property_read_u32(dev,"spi-bits-per-word",&spiBitsPerWord);
-        if(ret) {
-            pr_err("bmp280_driver: Error: Unable to read <spi-bits-per-word> property value\n");
-            return -1;
+    /* Read Chip ID */
+	id = spi_w8r8(spi_dev, BMP280_REG_CHIPID);
+	printk("Chip ID: 0x%x\n", id);
+
+    // Inițializăm senzorul
+    if (bmp280_write_register(REG_CTRL_MEAS, 0x27) < 0) { // Normal mode, oversampling 1x
+        pr_err("BMP280 driver: Unable to set normal mode of operation\n");
+        return -1;
+    }
+    if (bmp280_write_register(REG_CONFIG, 0xA0) < 0) { // Filtru de bază, standby de 1s
+        pr_err("BMP280 driver: Unable to set standby 1s and base filter configs\n");
+        return -1;
+    }
+    if (read_calibration_data() < 0) {
+        pr_err("BMP280 driver: Failed to read calibration data\n");
+        return -1;
+    }
+
+
+    pr_info("BMP280 driver probed\n");
+
+    return 0;
+}
+/* Funcția de citire a registrului prin SPI */
+static int bmp280_read_register(uint8_t reg, uint8_t *data, size_t len) {
+    uint8_t tx[1] = {reg | 0x80}; /* Setează bitul 7 la 0 pentru citire */
+    uint8_t rx[len + 1];
+    struct spi_transfer transfer[] = {
+        {
+            .tx_buf = tx,
+            .len = 1,
+        },
+        {
+            .rx_buf = rx,
+            .len = len + 1,
+        },
+    };
+
+    struct spi_message msg;
+    spi_message_init(&msg);
+    spi_message_add_tail(&transfer[0], &msg);
+    spi_message_add_tail(&transfer[1], &msg);
+
+    if (spi_sync(spi_dev, &msg) < 0) {
+        printk(KERN_ERR "BMP280: Failed to read register 0x%x\n", reg);
+        return -EIO;
+    }
+
+    memcpy(data, rx + 1, len);
+    return 0;
+}
+
+/* Funcția de citire a registrului prin SPI */
+static int bmp280_write_register(uint8_t reg, uint8_t value) {
+    uint8_t tx[] = {reg & 0x7F, value};
+    struct spi_transfer transfer[1] = {
+        {
+            .tx_buf = tx,
+            .len = 1,
         }
+    };
+
+    struct spi_message msg;
+    spi_message_init(&msg);
+    spi_message_add_tail(&transfer[0], &msg);
+
+    if (spi_sync(spi_dev, &msg) < 0) {
+        printk(KERN_ERR "BMP280: Failed to read register 0x%x\n", reg);
+        return -EIO;
     }
-    else {
-        pr_info("bmp280_driver: <spi-bits-per-word> property not configured in device tree\n");
-        spiBitsPerWord = 8; // 1MHz
-    }
-    
 
     return 0;
 }
 
-int bmp280_remove(platform_device *pdev)
+void bmp280_remove(struct spi_device *client)
 {
+    pr_info("Hello from bmp280_remove\n");
+}
+
+// Funcție pentru calcularea temperaturii
+int32_t compensate_temperature(int32_t raw_temp, int32_t *t_fine) {
+    int32_t var1, var2, T;
+    var1 = ((((raw_temp >> 3) - ((int32_t)calib.dig_T1 << 1))) * ((int32_t)calib.dig_T2)) >> 11;
+    var2 = (((((raw_temp >> 4) - ((int32_t)calib.dig_T1)) * ((raw_temp >> 4) - ((int32_t)calib.dig_T1))) >> 12) *
+            ((int32_t)calib.dig_T3)) >>
+           14;
+    *t_fine = var1 + var2;
+    T = (*t_fine * 5 + 128) >> 8;
+    return T;
+}
+
+// Funcție pentru calcularea presiunii
+uint32_t compensate_pressure(int32_t adc_P, int32_t t_fine) {
+    int64_t var1, var2, p;
+    var1 = ((int64_t)t_fine) - 128000;
+    var2 = var1 * var1 * (int64_t)calib.dig_P6;
+    var2 = var2 + ((var1 * (int64_t)calib.dig_P5) << 17);
+    var2 = var2 + (((int64_t)calib.dig_P4) << 35);
+    var1 = ((var1 * var1 * (int64_t)calib.dig_P3) >> 8) + ((var1 * (int64_t)calib.dig_P2) << 12);
+    var1 = (((((int64_t)1) << 47) + var1)) * ((int64_t)calib.dig_P1) >> 33;
+
+    if (var1 == 0) {
+        return 0;  // Diviziune la 0
+    }
+    p = 1048576 - adc_P;
+    p = (((p << 31) - var2) * 3125) / var1;
+    var1 = (((int64_t)calib.dig_P9) * (p >> 13) * (p >> 13)) >> 25;
+    var2 = (((int64_t)calib.dig_P8) * p) >> 19;
+    p = ((p + var1 + var2) >> 8) + (((int64_t)calib.dig_P7) << 4);
+    return (uint32_t)p;
+}
+
+/* Funcții de citire */
+static int bmp280_read_raw_data(int *raw_temp, int *raw_press) {
+    
+    uint8_t buffer[6];
+    if (bmp280_read_register(BMP280_REG_PRESS_MSB, buffer, 6) < 0) {
+        pr_err("Failed to read temperature/pressure\n");
+        return -1;
+    }
+    // Date brute
+    *raw_temp = (buffer[3] << 12) | (buffer[4] << 4) | (buffer[5] >> 4);
+    *raw_press = (buffer[0] << 12) | (buffer[1] << 4) | (buffer[2] >> 4);
+
     return 0;
 }
 
 ssize_t bmp280_temp_read(struct file *file, char __user *buffer, size_t len, loff_t *offset)
 {
+    int raw_temp, raw_press, t_fine;
+    char result[32];
+
+    /* Obține datele brute */
+    bmp280_read_raw_data(&raw_temp, &raw_press);
+    int32_t temperature = compensate_temperature(raw_temp, &t_fine);
+    
+    snprintf(result, sizeof(result), "Temperature: %d.%02d °C\n", temperature / 100, temperature % 100);    
+
     int to_copy, not_copied, delta;
 
-    to_copy = min(len, (size_t)strlen(temp_buffer) - *offset);
-    not_copied = copy_to_user(buffer, temp_buffer + *offset, to_copy);
+    to_copy = min(len, (size_t)strlen(result) - *offset);
+    not_copied = copy_to_user(buffer, result + *offset, to_copy);
     delta = to_copy - not_copied;
     *offset += delta;
     return delta; 
@@ -115,18 +249,59 @@ ssize_t bmp280_temp_read(struct file *file, char __user *buffer, size_t len, lof
 
 ssize_t bmp280_pressure_read (struct file *file, char __user *buffer, size_t len, loff_t *offset)
 {
+    int raw_temp, raw_press, t_fine;
+    char result[32];
+
+    /* Obține datele brute */
+    bmp280_read_raw_data(&raw_temp, &raw_press);
+    int32_t temperature = compensate_temperature(raw_temp, &t_fine);
+    uint32_t pressure = compensate_pressure(raw_press, t_fine);
+
+    snprintf(result, sizeof(result), "Pressure: %d.%02d hPa\n", pressure / 25600,(pressure % 25600) * 100 / 25600);
     int to_copy, not_copied, delta;
 
-    to_copy = min(len, (size_t)strlen(pressure_buffer) - *offset);
-    not_copied = copy_to_user(buffer, pressure_buffer + *offset, to_copy);
+    to_copy = min(len, (size_t)strlen(result) - *offset);
+    not_copied = copy_to_user(buffer, result + *offset, to_copy);
     delta = to_copy - not_copied;
     *offset += delta;
     return delta;
 }
+static int read_calibration_data(void) {
+    uint8_t calib_data[24];
+    if (bmp280_read_register(0x88, calib_data, 24) < 0) {
+        return -1;
+    }
+
+    calib.dig_T1 = calib_data[0] | (calib_data[1] << 8);
+    calib.dig_T2 = calib_data[2] | (calib_data[3] << 8);
+    calib.dig_T3 = calib_data[4] | (calib_data[5] << 8);
+    calib.dig_P1 = calib_data[6] | (calib_data[7] << 8);
+    calib.dig_P2 = calib_data[8] | (calib_data[9] << 8);
+    calib.dig_P3 = calib_data[10] | (calib_data[11] << 8);
+    calib.dig_P4 = calib_data[12] | (calib_data[13] << 8);
+    calib.dig_P5 = calib_data[14] | (calib_data[15] << 8);
+    calib.dig_P6 = calib_data[16] | (calib_data[17] << 8);
+    calib.dig_P7 = calib_data[18] | (calib_data[19] << 8);
+    calib.dig_P8 = calib_data[20] | (calib_data[21] << 8);
+    calib.dig_P9 = calib_data[22] | (calib_data[23] << 8);
+
+    return 0;
+}
 
 
 static int bmp280_init(void)
-{
+{   
+    pr_info("Hello from bmp280_init\n");
+
+    // Register platform driver
+    if(spi_register_driver(&bmp280_driver)) {
+        pr_err("Failed to register platform driver\n");
+        return -1;
+    }
+    else {
+        pr_info("Platform driver successdully registered\n");
+    }
+
     // Register temperature device 
     temp_major = register_chrdev(0, DEVICE_NAME_TEMP, &temp_fops);
     if (temp_major < 0) {
@@ -178,6 +353,8 @@ static int bmp280_init(void)
 
 static void bmp280_deinit(void)
 {
+    pr_info("Hello from bmp280_deinit\n");
+
      // Remove device nodes and class
     device_destroy(bmp280_class, MKDEV(temp_major, 0));
     device_destroy(bmp280_class, MKDEV(pressure_major, 0));
@@ -186,11 +363,15 @@ static void bmp280_deinit(void)
     // Unregister character devices
     unregister_chrdev(temp_major, DEVICE_NAME_TEMP);
     unregister_chrdev(pressure_major, DEVICE_NAME_PRESSURE);
+
+    // // Unregister platform driver
+    spi_unregister_driver(&bmp280_driver);
     pr_info("BMP280 module exited\n");
 }
 
 
 
+//module_spi_driver(bmp280_driver);
 module_init(bmp280_init);
 module_exit(bmp280_deinit);
 
