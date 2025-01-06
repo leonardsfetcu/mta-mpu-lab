@@ -27,7 +27,6 @@ static int read_calibration_data(void);
 
 
 
-
 // Device tree bindings
 static struct of_device_id bmp280_of_ids[] = {
     {
@@ -59,10 +58,9 @@ static struct bmp280_calib {
     int16_t dig_P7;
     int16_t dig_P8;
     int16_t dig_P9;
-};
+} calib;
 
 
-static struct bmp280_calib calib;
 static int driver_major;
 
 static struct spi_device *spi_dev;
@@ -286,7 +284,7 @@ static int bmp280_init(void)
         return -1;
     }
     else {
-        pr_info("BMP280 driver: Platform driver successfully registered\n");
+        pr_info("BMP280 driver: Successfully registered platform driver\n");
     }
 
     // Register device
@@ -313,7 +311,7 @@ static int bmp280_init(void)
         return PTR_ERR(bmp280_device);
     }
 
-    pr_info("BMP280 driver: successfully initialized. Major number: %d\n", driver_major);
+    pr_info("BMP280 driver: Successfully initialized. Major number: %d\n", driver_major);
 
     return 0;
 }
