@@ -295,7 +295,7 @@ static int bmp280_init(void)
     }
 
     // Create device class
-    bmp280_class = class_create(CLASS_NAME);
+    bmp280_class = class_create(THIS_MODULE,CLASS_NAME);
     if (IS_ERR(bmp280_class)) {
         pr_err("BMP280 driver: Failed to create device class\n");
         unregister_chrdev(driver_major, DEVICE_NAME);

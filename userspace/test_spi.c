@@ -20,7 +20,6 @@
 #define BMP280_REG_TEMP_MSB 0xFA
 #define BMP280_CHIP_ID 0x58
 
-// Structura pentru coeficienții de calibrare
 struct bmp280_calib {
     uint16_t dig_T1;
     int16_t dig_T2;
@@ -35,6 +34,7 @@ struct bmp280_calib {
     int16_t dig_P8;
     int16_t dig_P9;
 };
+
 int init_spi() {
     int spi_fd = open(SPI_DEVICE, O_RDWR);
     if (spi_fd < 0) {
@@ -63,7 +63,7 @@ int init_spi() {
     return spi_fd;
 }
 
-// Funcție pentru citirea unui registru
+// Reading from register address function
 int spi_read_register(int fd, uint8_t reg, uint8_t *data, size_t length) {
     uint8_t tx[1] = {reg | 0x80}; // Bitul MSB 1 pentru citire
     uint8_t rx[length + 1];
@@ -87,7 +87,7 @@ int spi_read_register(int fd, uint8_t reg, uint8_t *data, size_t length) {
     return 0;
 }
 
-// Funcție pentru scrierea unui registru
+// Writing to register address function
 int spi_write_register(int fd, uint8_t reg, uint8_t value) {
     
     uint8_t tx[] = {reg & 0x7F, value};
@@ -100,7 +100,7 @@ int spi_write_register(int fd, uint8_t reg, uint8_t value) {
         .cs_change = 0
     };
 
-    // Trimiterea datelor pe SPI
+    // Send data through SPI bus
     if (ioctl(fd, SPI_IOC_MESSAGE(1), &tr) < 0) {
         perror("Failed to write register");
         return -1;
@@ -109,7 +109,6 @@ int spi_write_register(int fd, uint8_t reg, uint8_t value) {
     return 0;
 }
 
-// Funcție pentru citirea coeficienților de calibrare
 int read_calibration_data(int fd, struct bmp280_calib *calib) {
     uint8_t calib_data[24];
     if (spi_read_register(fd, 0x88, calib_data, 24) < 0) {
@@ -132,7 +131,6 @@ int read_calibration_data(int fd, struct bmp280_calib *calib) {
     return 0;
 }
 
-// Funcție pentru calcularea temperaturii
 int32_t compensate_temperature(int32_t adc_T, struct bmp280_calib *calib, int32_t *t_fine) {
     int32_t var1, var2, T;
     var1 = ((((adc_T >> 3) - ((int32_t)calib->dig_T1 << 1))) * ((int32_t)calib->dig_T2)) >> 11;
@@ -144,7 +142,6 @@ int32_t compensate_temperature(int32_t adc_T, struct bmp280_calib *calib, int32_
     return T;
 }
 
-// Funcție pentru calcularea presiunii
 uint32_t compensate_pressure(int32_t adc_P, struct bmp280_calib *calib, int32_t t_fine) {
     int64_t var1, var2, p;
     var1 = ((int64_t)t_fine) - 128000;
@@ -155,7 +152,7 @@ uint32_t compensate_pressure(int32_t adc_P, struct bmp280_calib *calib, int32_t 
     var1 = (((((int64_t)1) << 47) + var1)) * ((int64_t)calib->dig_P1) >> 33;
 
     if (var1 == 0) {
-        return 0;  // Diviziune la 0
+        return 0;
     }
     p = 1048576 - adc_P;
     p = (((p << 31) - var2) * 3125) / var1;
@@ -172,7 +169,7 @@ int main() {
         return -1;
     }
 
-    // Verificarea ID-ului senzorului
+    // Check sensor ID value
     uint8_t chip_id;
     if (spi_read_register(fd, BMP280_REG_CHIPID, &chip_id, 1) < 0 || chip_id != BMP280_CHIP_ID) {
         printf("Failed to detect BMP280 sensor (Chip ID: 0x%02X)\n", chip_id);
@@ -181,15 +178,14 @@ int main() {
     }
     printf("BMP280 detected (Chip ID: 0x%02X)\n", chip_id);
 
-    // Inițializăm senzorul
+    // Initialise sensor: configure normal mode + base filter + standby 1sec 
     if (spi_write_register(fd,REG_CTRL_MEAS, 0x27) < 0) { // Normal mode, oversampling 1x
         return -1;
     }
-    if (spi_write_register(fd,REG_CONFIG, 0xA0) < 0) { // Filtru de bază, standby de 1s
+    if (spi_write_register(fd,REG_CONFIG, 0xA0) < 0) { // Base filter, 1s standby
         return -1;
     }
 
-    // Citirea coeficienților de calibrare
     struct bmp280_calib calib;
     if (read_calibration_data(fd, &calib) < 0) {
         printf("Failed to read calibration data\n");
@@ -197,7 +193,7 @@ int main() {
         return -1;
     }
 
-    // Infinite loop
+    // Main loop
     while (1) {
         uint8_t data[6];
         if (spi_read_register(fd, BMP280_REG_PRESS_MSB, data, 6) < 0) {
