@@ -1,0 +1,435 @@
+// SPDX-License-Identifier: GPL-2.0+
+/*
+ * Copyright 2018 Wandboard, Org.
+ * Copyright 2017 NXP
+ *
+ * Author: Richard Hu <hakahu@gmail.com>
+ */
+
+/dts-v1/;
+
+#include "imx8mq-pico.dtsi"
+
+
+&gpio3 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_gpio3>;
+	gpio-line-names =
+		"GPIO_P28", "", "", "GPIO_P25", "", "GPIO_P30", "", "",
+		"", "", "", "", "", "", "", "GPIO_P32",
+		"", "", "", "", "", "", "", "",
+		"", "", "", "", "", "", "", "";
+};
+
+/ {
+	model = "TechNexion PICO-IMX8MQ and PI baseboard";
+	compatible = "pico,imx8mq-pico", "fsl,imx8mq";
+
+	chosen {
+		stdout-path = &uart1;
+	};
+
+	regulators {
+		compatible = "simple-bus";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		reg_usb_otg_vbus: regulator-usb-otg-vbus {
+			pinctrl-names = "default";
+			pinctrl-0 = <&pinctrl_otg_vbus>;
+			compatible = "regulator-fixed";
+			regulator-name = "usb_otg_vbus";
+			regulator-min-microvolt = <5000000>;
+			regulator-max-microvolt = <5000000>;
+			gpio = <&gpio3 14 GPIO_ACTIVE_LOW>;
+		};
+
+		reg_backlight_pwr: regulator_blpwr {
+			pinctrl-names = "default";
+			pinctrl-0 = <&pinctrl_backlight_pwr>;
+			compatible = "regulator-fixed";
+			regulator-name = "backlight_pwr";
+			regulator-min-microvolt = <5000000>;
+			regulator-max-microvolt = <5000000>;
+			gpio = <&gpio1 8 GPIO_ACTIVE_HIGH>;
+			enable-active-high;
+		};
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		pinctrl-names = "default";
+
+		led {
+			label = "gpio-led";
+			pintctrl-0 = <&pinctrl_led>;
+			gpios = <&gpio5 5 0>;
+			linux,default-trigger = "heartbeat";
+		};
+	};
+
+	backlight_mipi {
+		compatible = "pwm-backlight";
+		pwms = <&pwm1 0 50000 0>;
+		brightness-levels = <0 36 72 108 144 180 216 255>;
+		default-brightness-level = <6>;
+		power-supply = <&reg_backlight_pwr>;
+		status = "disabled";
+	};
+
+	sound-hdmi {
+		compatible = "fsl,imx-audio-hdmi";
+		model = "imx-audio-hdmi";
+		audio-cpu = <&sai4>;
+		protocol = <1>;
+		hdmi-out;
+		constraint-rate = <44100>,
+				<88200>,
+				<176400>,
+				<32000>,
+				<48000>,
+				<96000>,
+				<192000>;
+	};
+
+	fan: pwm-fan {
+		compatible = "pwm-fan";
+		cooling-levels = <0 32 96 255>;
+		#cooling-cells = <2>;
+		pwms = <&pwm4 0 40000 0>;
+	};
+
+	thermal-zones {
+		cpu-thermal {
+			trips {
+				cpu_warm: cpu_warm {
+					temperature = <55000>;
+					hysteresis = <2000>;
+					type = "active";
+				};
+
+				cpu_hot: cpu_hot {
+					temperature = <60000>;
+					hysteresis = <2000>;
+					type = "active";
+				};
+			};
+
+			cooling-maps {
+				map1 {
+					trip = <&cpu_warm>;
+					cooling-device = <&fan THERMAL_NO_LIMIT 1>;
+				};
+
+				map2 {
+					trip = <&cpu_hot>;
+					cooling-device = <&fan 2 THERMAL_NO_LIMIT>;
+				};
+			};
+		};
+	};
+};
+
+&sai4 {
+	assigned-clocks = <&clk IMX8MQ_AUDIO_PLL1>, <&clk IMX8MQ_AUDIO_PLL2>, <&clk IMX8MQ_CLK_SAI4>;
+	assigned-clock-parents = <0>, <0>, <&clk IMX8MQ_AUDIO_PLL1_OUT>;
+	assigned-clock-rates = <786432000>, <722534400>, <24576000>;
+	clocks = <&clk IMX8MQ_CLK_SAI4_IPG>, <&clk IMX8MQ_CLK_DUMMY>,
+		<&clk IMX8MQ_CLK_SAI4_ROOT>, <&clk IMX8MQ_CLK_DUMMY>,
+		<&clk IMX8MQ_CLK_DUMMY>, <&clk IMX8MQ_AUDIO_PLL1_OUT>,
+		<&clk IMX8MQ_AUDIO_PLL2_OUT>;
+	clock-names = "bus", "mclk0", "mclk1", "mclk2", "mclk3", "pll8k", "pll11k";
+	status = "okay";
+};
+
+&usb3_phy0 {
+	status = "okay";
+};
+
+&usb_dwc3_0 {
+	dr_mode = "otg";
+	pinctrl-names = "default";
+	usb-role-switch;
+	status = "okay";
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+			dwc3_out_ep: endpoint {
+				remote-endpoint = <&hd3ss3220_in_ep>;
+			};
+		};
+
+		port@1 {
+			reg = <1>;
+			dwc3_in_ep: endpoint {
+				remote-endpoint = <&hd3ss3220_out_ep>;
+			};
+		};
+	};
+};
+
+&usb3_phy1 {
+	status = "okay";
+};
+
+&usb_dwc3_1 {
+	dr_mode = "host";
+	status = "okay";
+};
+
+&dcss {
+	status = "okay";
+
+	port@0 {
+		dcss_out: endpoint {
+			remote-endpoint = <&hdmi_in>;
+		};
+	};
+};
+
+&hdmi {
+	compatible = "cdn,imx8mq-hdmi";
+	lane-mapping = <0xe4>;
+	status = "okay";
+	port@1 {
+		hdmi_in: endpoint {
+			remote-endpoint = <&dcss_out>;
+		};
+	};
+};
+
+&iomuxc {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_hog>;
+
+	pinctrl_hog: hoggrp {
+		fsl,pins = <
+			/* Clock for both CSI1 and CSI2 */
+			MX8MQ_IOMUXC_GPIO1_IO15_CCMSRCGPCMIX_CLKO2	0x07
+		>;
+	};
+
+	pinctrl_otg_vbus: otgvbusgrp {
+		fsl,pins = <
+			MX8MQ_IOMUXC_NAND_DQS_GPIO3_IO14		0x19   /* USB OTG VBUS Enable */
+		>;
+	};
+
+	pinctrl_backlight_pwr: backlight_pwrgrp {
+		fsl,pins = <
+			MX8MQ_IOMUXC_GPIO1_IO08_GPIO1_IO8		0x19
+		>;
+	};
+
+	pinctrl_dsi_pwm: dsi_pwm {
+		fsl,pins = <
+			MX8MQ_IOMUXC_GPIO1_IO01_PWM1_OUT		0x16	/* DSI PWM */
+		>;
+	};
+
+	pinctrl_fan_pwm: fan_pwm {
+		fsl,pins = <
+			MX8MQ_IOMUXC_SAI3_MCLK_PWM4_OUT			0x16	/* FAN PWM */
+		>;
+	};
+
+	pinctrl_mipi_dsi_rst: mipi_dsi_rst {
+		fsl,pins = <
+			MX8MQ_IOMUXC_NAND_WE_B_GPIO3_IO17	0x16   /* DSI RST */
+		>;
+	};
+
+	pinctrl_touch_irq: touch_irqgrp {
+		fsl,pins = <
+			MX8MQ_IOMUXC_GPIO1_IO07_GPIO1_IO7	0x41
+		>;
+	};
+
+	pinctrl_hd3ss3220_irq: hd3ss3220_irqgrp {
+		fsl,pins = <
+			MX8MQ_IOMUXC_NAND_CE0_B_GPIO3_IO1	0x41
+		>;
+	};
+
+	pinctrl_csi1: csi1grp {
+		fsl,pins = <
+			MX8MQ_IOMUXC_GPIO1_IO12_GPIO1_IO12		0x19   /* CSI nRST */
+		>;
+	};
+
+	pinctrl_csi2: csi2grp {
+		fsl,pins = <
+			MX8MQ_IOMUXC_NAND_READY_B_GPIO3_IO16		0x19   /* GPIO_P44, CSI nRST */
+		>;
+	};
+
+	pinctrl_ecspi1: ecspi1grp {
+			fsl,pins = <
+				MX8MQ_IOMUXC_ECSPI1_SCLK_ECSPI1_SCLK	0x82
+				MX8MQ_IOMUXC_ECSPI1_MOSI_ECSPI1_MOSI	0x82	/* ECSPI1_MOSI conflicts with CSI P2 PWDN*/
+				MX8MQ_IOMUXC_ECSPI1_MISO_ECSPI1_MISO	0x82
+			>;
+		};
+
+	pinctrl_ecspi1_cs: ecspi1cs {
+		fsl,pins = <
+			MX8MQ_IOMUXC_ECSPI1_SS0_GPIO5_IO9	0x16
+		>;
+	};
+
+	pinctrl_touch_rst: touch_rstgrp {
+		fsl,pins = <
+			MX8MQ_IOMUXC_NAND_WP_B_GPIO3_IO18	0x16
+		>;
+	};
+
+	pinctrl_led: ledggrp {
+		fsl,pins = <
+			MX8MQ_IOMUXC_SPDIF_EXT_CLK_GPIO5_IO5	0x19
+		>;
+	};
+
+	/* GPIO on expansion IO J8 connector */
+	pinctrl_gpio3: gpio3grp {
+		fsl,pins = <
+			MX8MQ_IOMUXC_NAND_ALE_GPIO3_IO0			0x19 /* GPIO_P28 */
+			MX8MQ_IOMUXC_NAND_CE2_B_GPIO3_IO3		0x19 /* GPIO_P25, CLIX_RESET */
+			MX8MQ_IOMUXC_NAND_CLE_GPIO3_IO5			0x19 /* GPIO_P30 */
+			MX8MQ_IOMUXC_NAND_RE_B_GPIO3_IO15		0x19 /* GPIO_P32 */
+		>;
+	};
+};
+
+&ecspi1 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	num-cs = <1>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_ecspi1 &pinctrl_ecspi1_cs>;
+	cs-gpios = <&gpio5 9 GPIO_ACTIVE_LOW>;
+	status = "okay"; /* ECSPI1_MOSI conflicts with CSI P2 PWDN*/
+
+	spidev0: spi@0 {
+		reg = <0>;
+		compatible = "rohm,dh2228fv";
+		spi-max-frequency = <1000000>;
+	};
+};
+
+&i2c2 {
+	status = "okay";
+
+	typec_hd3ss3220: hd3ss3220@67 {
+		compatible = "ti,hd3ss3220";
+		interrupts-extended = <&gpio3 1 IRQ_TYPE_LEVEL_LOW>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_hd3ss3220_irq>;
+		vbus-supply = <&reg_usb_otg_vbus>;
+		reg = <0x67>;
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+				hd3ss3220_in_ep: endpoint {
+					remote-endpoint = <&dwc3_out_ep>;
+				};
+			};
+
+			port@1 {
+				reg = <1>;
+				hd3ss3220_out_ep: endpoint {
+					remote-endpoint = <&dwc3_in_ep>;
+				};
+			};
+		};
+	};
+
+	pca9555_i2c2_a21: pca9555@21 {
+		reg = <0x21>;
+		status = "disabled";
+	};
+
+	tevs_mipi1: tevs_mipi@48 {
+		reg = <0x48>;
+		status = "disabled";
+	};
+};
+
+&i2c3 {
+	status = "okay";
+
+	pca9554_tev_mipi2: pca9554_tev_mipi@24 {
+		reg = <0x24>;
+		status = "disabled";
+	};
+
+	tevs_mipi2: tevs_mipi2@48 {
+		reg = <0x48>;
+		status = "disabled";
+	};
+};
+
+&csi1_bridge {
+	fsl,mipi-mode;
+	fsl,two-8bit-sensor-mode;
+	status = "okay";
+
+	port {
+		csi1_ep: endpoint {
+			remote-endpoint = <&csi1_mipi_ep>;
+		};
+	};
+};
+
+&csi2_bridge {
+	fsl,mipi-mode;
+	fsl,two-8bit-sensor-mode;
+	status = "okay";
+
+	port {
+		csi2_ep: endpoint {
+			remote-endpoint = <&csi2_mipi_ep>;
+		};
+	};
+};
+
+&mipi_csi_1 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	status = "okay";
+	port {
+		csi1_mipi_ep: endpoint@1 {
+			remote-endpoint = <&csi1_ep>;
+		};
+	};
+};
+
+&mipi_csi_2 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	status = "okay";
+	port {
+		csi2_mipi_ep: endpoint@1 {
+			remote-endpoint = <&csi2_ep>;
+		};
+	};
+};
+
+&pwm1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_dsi_pwm>;
+	status = "okay";
+};
+
+&pwm4 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_fan_pwm>;
+	status = "okay";
+};
