@@ -179,10 +179,10 @@ int main() {
     printf("BMP280 detected (Chip ID: 0x%02X)\n", chip_id);
 
     // Initialise sensor: configure normal mode + base filter + standby 1sec 
-    if (spi_write_register(fd,REG_CTRL_MEAS, 0x27) < 0) { // Normal mode, oversampling 1x
+    if (spi_write_register(fd,REG_CTRL_MEAS, 0x2F) < 0) { // Normal mode, oversampling 1x
         return -1;
     }
-    if (spi_write_register(fd,REG_CONFIG, 0xA0) < 0) { // Base filter, 1s standby
+    if (spi_write_register(fd,REG_CONFIG, 0x10) < 0) { // 0.5ms stdby, filter coef 16
         return -1;
     }
 
