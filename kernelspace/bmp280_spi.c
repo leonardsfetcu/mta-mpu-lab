@@ -102,15 +102,15 @@ int bmp280_probe(struct spi_device *client)
         pr_info("BMP280 driver: Chip ID: 0x%x\n", id);
     }
 
-    // BMP280 configuration for normal mode and oversampling 1x
-    if (bmp280_write_register(REG_CTRL_MEAS, 0x27) < 0) {
-        pr_err("BMP280 driver: Unable to set normal mode of operation\n");
+    // BMP280 configuration for normal mode, oversampling temp x1, oversampling pressure x4 
+    if (bmp280_write_register(REG_CTRL_MEAS, 0x2F) < 0) {
+        pr_err("BMP280 driver: Unable to set measuring operation config\n");
         return -1;
     }
 
-    // BMP280 configuration for 1s standby and base filter
+    // BMP280 configuration for 0.5ms Tstdby, IIR filter coef = 16 and 4 wires SPI mode
     if (bmp280_write_register(REG_CONFIG, 0xA0) < 0) {
-        pr_err("BMP280 driver: Unable to set standby 1s and base filter configs\n");
+        pr_err("BMP280 driver: Unable to set sensor configuration parameters\n");
         return -1;
     }
 
@@ -127,15 +127,15 @@ int bmp280_probe(struct spi_device *client)
 
 // SPI reading from register function
 int bmp280_read_register(uint8_t reg, uint8_t *data, size_t length) {
-    uint8_t tx_buf = reg | 0x80; //Set first bit to 1 to indicate a read operation
-    uint8_t rx_buf[length];
+    uint8_t tx = reg | 0x80; //Set first bit to 1 to indicate a read operation
+    uint8_t rx[length];
     struct spi_transfer transfer[] = {
         {
-            .tx_buf = &tx_buf,
-            .len = 1,
+            .tx_buf = &tx,
+            .len = sizeof(tx),
         },
         {
-            .rx_buf = rx_buf,
+            .rx_buf = rx,
             .len = length,
         },
     };
@@ -146,7 +146,7 @@ int bmp280_read_register(uint8_t reg, uint8_t *data, size_t length) {
         return ret;
     }
 
-    memcpy(data, rx_buf, length);
+    memcpy(data, rx, length);
 
     return 0;
 }
@@ -155,10 +155,10 @@ int bmp280_read_register(uint8_t reg, uint8_t *data, size_t length) {
 // SPI writing to register function
 static int bmp280_write_register(uint8_t reg, uint8_t value) {
     uint8_t tx[] = {reg & 0x7F, value};
-    struct spi_transfer transfer[1] = {
+    struct spi_transfer transfer[] = {
         {
             .tx_buf = tx,
-            .len = 1,
+            .len = sizeof(tx),
         }
     };
 
