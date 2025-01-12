@@ -13,12 +13,23 @@
 #define SPI_SPEED 100000
 #define SPI_BITS 8
 
-#define BMP280_REG_CHIPID 0xD0
+#define REG_CHIPID 0xD0
 #define REG_CTRL_MEAS 0xF4
-#define BMP280_REG_PRESS_MSB 0xF7
+#define REG_PRESS_MSB 0xF7
 #define REG_CONFIG 0xF5
-#define BMP280_REG_TEMP_MSB 0xFA
+#define REG_RESET 0xE0
+#define REG_TEMP_MSB 0xFA
 #define BMP280_CHIP_ID 0x58
+
+/* *    osrs_p[2:0] = x4 =      011
+*       osrs_t[2:0] = x1 =      001
+*       mode[1:0] = normal =    11
+*       ==> ctrl_meas = 0010 1111 = 2F
+*
+*       t_stdby[2:0] = 0.5ms = 000
+*       IIR_filter[2:0] = 16 = 100
+*       ==> config = 000 100 00 = 10
+* */
 
 struct bmp280_calib {
     uint16_t dig_T1;
@@ -168,10 +179,17 @@ int main() {
         perror("Failed to open SPI device");
         return -1;
     }
-
+    
+    // Soft reset the sensor
+    if (spi_write_register(fd,REG_RESET, 0xB6) < 0) {
+        printf("Failed to reset the sensor\n");
+        close(fd);
+        return -1;
+    }
+    
     // Check sensor ID value
     uint8_t chip_id;
-    if (spi_read_register(fd, BMP280_REG_CHIPID, &chip_id, 1) < 0 || chip_id != BMP280_CHIP_ID) {
+    if (spi_read_register(fd, REG_CHIPID, &chip_id, 1) < 0 || chip_id != BMP280_CHIP_ID) {
         printf("Failed to detect BMP280 sensor (Chip ID: 0x%02X)\n", chip_id);
         close(fd);
         return -1;
@@ -196,7 +214,7 @@ int main() {
     // Main loop
     while (1) {
         uint8_t data[6];
-        if (spi_read_register(fd, BMP280_REG_PRESS_MSB, data, 6) < 0) {
+        if (spi_read_register(fd, REG_PRESS_MSB, data, 6) < 0) {
             printf("Failed to read sensor data\n");
             break;
         }
