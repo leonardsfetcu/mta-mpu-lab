@@ -11,6 +11,7 @@
 #define CLASS_NAME "bmp280_sensor_class"
 #define REG_CHIPID 0xD0
 #define REG_CTRL_MEAS 0xF4
+#define REG_RESET 0xE0
 #define REG_PRESS_MSB 0xF7
 #define REG_CONFIG 0xF5
 #define REG_TEMP_MSB 0xFA
