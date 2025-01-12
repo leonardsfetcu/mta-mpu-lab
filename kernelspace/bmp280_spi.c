@@ -9,13 +9,22 @@
 
 #define DEVICE_NAME "bmp280_sensor"
 #define CLASS_NAME "bmp280_sensor_class"
-#define BMP280_REG_CHIPID 0xD0
+#define REG_CHIPID 0xD0
 #define REG_CTRL_MEAS 0xF4
-#define BMP280_REG_PRESS_MSB 0xF7
+#define REG_PRESS_MSB 0xF7
 #define REG_CONFIG 0xF5
-#define BMP280_REG_TEMP_MSB 0xFA
+#define REG_TEMP_MSB 0xFA
 #define BMP280_CHIP_ID 0x58
 
+/* * 	osrs_p[2:0] = x4 = 	011
+*	osrs_t[2:0] = x1 = 	001
+*	mode[1:0] = normal = 	11
+*	==> ctrl_meas = 0010 1111 = 2F
+*
+*	t_stdby[2:0] = 0.5ms = 000
+*	IIR_filter[2:0] = 16 = 100
+*	==> config = 000 100 00 = 10
+* */
 
 // Functions declaration
 static int bmp280_probe(struct spi_device *client);
@@ -90,9 +99,16 @@ int bmp280_probe(struct spi_device *client)
     {
         pr_info("BMP280 driver: SPI bus OK\n");
     }
+    
+    // Soft reset the sensor
+    if (bmp280_write_register(REG_RESET, 0xB6) < 0) {
+        pr_err("BMP280 driver: Unable to reset the sensor\n");
+        return -1;
+    }
+
 
     // Read Chip ID
-    ret = bmp280_read_register(BMP280_REG_CHIPID,&id,sizeof(id));
+    ret = bmp280_read_register(REG_CHIPID,&id,sizeof(id));
 	if (ret < 0) {
         pr_err("BMP280 driver: Failed to get ChipID\n");
         return ret;
@@ -216,7 +232,7 @@ uint32_t compensate_pressure(int32_t adc_P, int32_t t_fine) {
 static int bmp280_read_raw_data(int *raw_temp, int *raw_press) {
     
     uint8_t buffer[6];
-    if (bmp280_read_register(BMP280_REG_PRESS_MSB, buffer, 6) < 0) {
+    if (bmp280_read_register(REG_PRESS_MSB, buffer, 6) < 0) {
         pr_err("Failed to read temperature/pressure\n");
         return -1;
     }
